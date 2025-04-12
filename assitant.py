@@ -1,4 +1,4 @@
-from typing import Optional
+import os
 
 from agno.agent import Agent
 from agno.models.google import Gemini
@@ -40,7 +40,7 @@ def get_matching_agent(
     session_id=session_id,
     model=Gemini(
       id="gemini-1.5-flash",
-      api_key="AIzaSyBj58PkjqKsPexxYWlGkMhMoM5oMB3urzw",
+      api_key=os.environ.get("GEMINI_API_KEY"),
     ),
     introduction="I'm here to help match line-items across PO, Invoice, and GRN documents.",
     add_history_to_messages=True,
@@ -76,65 +76,27 @@ def get_matching_agent(
       "Never Change the value of count or unit price"
     ),
     expected_output="""{
-  "matchedCount": 3,
-  "totalCount": 5,
+  "matchedCount": 10,
+  "totalCount": 10,
   "items": [
     {
-      "itemCode": "Widget A",
+      "itemCode": "C1004",
       "po": {
-        "quantity": 10,
-        "unitPrice": 5.00,
-        "totalAmount": 50.00
+        "quantity": 20.0,
+        "unitPrice": 17.0,
+        "totalAmount": 340.0
       },
       "invoice": {
-        "quantity": 10,
-        "unitPrice": 5.00,
-        "totalAmount": 50.00
+        "quantity": 20.0,
+        "unitPrice": 17.0,
+        "totalAmount": 340.0
       },
       "grn": {
-        "quantity": 10,
-        "unitPrice": 5.00,
-        "totalAmount": 50.00
+        "quantity": 20.0,
+        "unitPrice": 17.0,
+        "totalAmount": 340.0
       },
       "status": "match"
-    },
-    {
-      "itemCode": "Gadget B",
-      "po": {
-        "quantity": 14,
-        "unitPrice": 7.50,
-        "totalAmount": 105.00
-      },
-      "invoice": {
-        "quantity": 14,
-        "unitPrice": 7.50,
-        "totalAmount": 105.50
-      },
-      "grn": {
-        "quantity": 13.5,
-        "unitPrice": 7.50,
-        "totalAmount": 105.50
-      },
-      "status": "partial"
-    },
-    {
-      "itemCode": "Gadget E",
-      "po": {
-        "quantity": 20,
-        "unitPrice": 8.00,
-        "totalAmount": 160.00
-      },
-      "invoice": {
-        "quantity": 80,
-        "unitPrice": 8.00,
-        "totalAmount": 200.00
-      },
-      "grn": {
-        "quantity": 80,
-        "unitPrice": 8.00,
-        "totalAmount": 200.00
-      },
-      "status": "mismatch"
     }
   ]
 }
@@ -146,67 +108,3 @@ def get_matching_agent(
     markdown=False,
     stream=False
   )
-
-
-
-# class ResponseModel(BaseModel):
-#     matchedCount: int
-#     totalCount: int
-#     items: List[Item]
-#     message: str
-#
-# agent = Agent(
-#     name="3-Way Document Matching Assistant",
-#     agent_id=MATCHING_AGENT,
-#     session_id=session_id,
-#     model=Gemini(
-#         id="gemini-1.5-flash",
-#         api_key="AIzaSyBj58PkjqKsPexxYWlGkMhMoM5oMB3urzw",
-#     ),
-#     introduction="I'm here to help match line-items across PO, Invoice, and GRN documents.",
-#     add_history_to_messages=True,
-#     description="Upload three documents and I'll compare them line-by-line.",
-#     instructions=(
-#         "Accept three documents: PO, Invoice, GRN. "
-#         "Do not update those values in output. "
-#         "Use OCR (Google Vision API) to extract line items from each. "
-#         "Each line item must contain: Item Code / Description, Quantity, Unit Price, and Total Amount. "
-#         "Group items by Item Code, aligning PO, Invoice, and GRN values side-by-side. "
-#         "Compare values from all three documents for each item and compute a status field per row: "
-#         "'match' if all values are the same, 'partial' if within a 2% tolerance, 'mismatch' otherwise. "
-#         "Return a summary of total items and number of exact matches, along with detailed item-wise comparison."
-#         "Never Change the value of count or unit price. "
-#         "Always return the exact match value that was in the input. "
-#         "The output must always follow the structure defined in the ResponseModel."
-#     ),
-#     expected_output="""
-#     {
-#         "matchedCount": 3,
-#         "totalCount": 5,
-#         "items": [
-#             {
-#                 "itemCode": "Widget A",
-#                 "po": {
-#                     "quantity": 10,
-#                     "unitPrice": 5.00,
-#                     "totalAmount": 50.00
-#                 },
-#                 "invoice": {
-#                     "quantity": 10,
-#                     "unitPrice": 5.00,
-#                     "totalAmount": 50.00
-#                 },
-#                 "grn": {
-#                     "quantity": 10,
-#                     "unitPrice": 5.00,
-#                     "totalAmount": 50.00
-#                 },
-#                 "status": "match"
-#             }
-#         ],
-#         "message": "Comparison completed successfully."
-#     }
-#     """,
-#     response_model=ResponseModel,
-#     structured_outputs=True,
-# )

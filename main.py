@@ -1,18 +1,22 @@
+import json
+import os
 import re
+import tempfile
+import uuid
 from typing import List, Dict
 
 from agno.media import Image
+from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from pdf2image import convert_from_path
 import pytesseract
-import uuid
-import json
 import fitz
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 
 from assitant import get_matching_agent
 
+load_dotenv()
 app = FastAPI()
 app.add_middleware(
   CORSMiddleware,
@@ -26,46 +30,35 @@ app.add_middleware(
 # --------------------------
 # Utility: Save file locally
 # --------------------------
+# def save_temp_file(upload_file: UploadFile) -> str:
+#   temp_file_path = f"/tmp/{uuid.uuid4().hex}_{upload_file.filename}"
+#   with open(temp_file_path, "wb") as f:
+#     f.write(upload_file.file.read())
+#   return temp_file_path
+
 def save_temp_file(upload_file: UploadFile) -> str:
-  temp_file_path = f"/tmp/{uuid.uuid4().hex}_{upload_file.filename}"
-  with open(temp_file_path, "wb") as f:
-    f.write(upload_file.file.read())
-  return temp_file_path
-
-
-#
-#
-# # --------------------------
-# # Universal OCR function
-# # --------------------------
-# def extract_text(file_path: str) -> str:
-#   ext = os.path.splitext(file_path)[1].lower()
-#
-#   if ext == ".pdf":
-#     # Convert PDF to list of images
-#     images = convert_from_path(file_path)
-#   # elif ext in [".png", ".jpg", ".jpeg"]:
-#   #   # Direct image
-#   #   images = [PILImage.open(file_path)]
-#   else:
-#     raise ValueError("Unsupported file format. Only PDF, PNG, JPEG are supported.")
-#   text = "\n".join([pytesseract.image_to_string(image) for image in images]);
-#   # OCR on each image/page
-#   return text
+  suffix = os.path.splitext(upload_file.filename)[-1]
+  fd, path = tempfile.mkstemp(suffix=suffix)
+  with os.fdopen(fd, 'wb') as tmp:
+    tmp.write(upload_file.file.read())
+  print(f"[Saved] File saved to: {path}")
+  return path
 
 
 def extract_text(file_path: str) -> str:
-  if not file_path.lower().endswith(".pdf"):
-    raise ValueError("Only PDF files are supported.")
-
-  # First, try to extract digital text using PyMuPDF
-  text = extract_text_from_pdf(file_path)
-  if text.strip():
-    return text.strip()
-
-  # If digital text extraction fails, fallback to OCR
-  print("[Info] No text found in PDF, using OCR...")
-  return extract_text_from_pdf_ocr(file_path)
+  ext = file_path.lower()
+  if ext.endswith(".pdf"):
+    # First, try to extract digital text using PyMuPDF
+    text = extract_text_from_pdf(file_path)
+    if text.strip():
+      return text.strip()
+    # If digital text extraction fails, fallback to OCR
+    print("[Info] No text found in PDF, using OCR...")
+    return extract_text_from_pdf_ocr(file_path)
+  # elif ext.endswith((".png", ".jpg", ".jpeg")):
+  #   return extract_text_from_image(file_path)
+  else:
+    raise ValueError("Unsupported file type: only PDF or image files allowed.")
 
 
 def extract_text_from_pdf(file_path: str) -> str:
@@ -78,6 +71,23 @@ def extract_text_from_pdf_ocr(file_path: str) -> str:
   """Extract text using OCR (for scanned/image-based PDFs)"""
   images = convert_from_path(file_path)
   return "\n".join([pytesseract.image_to_string(image) for image in images])
+
+
+#
+# def extract_text_from_image(file_path: str) -> str:
+#   try:
+#     print(f"[Info] Opening image: {file_path}")
+#     image = Image.open(file_path)
+#     image = image.convert("RGB")  # Just in case it's a weird format
+#     print("[Info] Image loaded successfully, performing OCR...")
+#     text = pytesseract.image_to_string(image)
+#     print("[Info] OCR completed.")
+#     return text
+#   except Exception as e:
+#     print(f"[OCR Error] Failed to extract from image: {e}")
+#     import traceback
+#     traceback.print_exc()
+#     return ""
 
 
 def clean_text(text: str) -> str:
@@ -130,107 +140,79 @@ def parse_line_items(text: str) -> List[Dict]:
 
   return items
 
-  # --------------------------
-  # Step 3: Matching Logic
-  # --------------------------
-  # def match_line_items(po_lines, invoice_lines, grn_lines, tolerance=0.01):
-  #   po_dict = {item['item_code']: item for item in po_lines}
-  #   invoice_dict = {item['item_code']: item for item in invoice_lines}
-  #   grn_dict = {item['item_code']: item for item in grn_lines}
-  #
-  #   common_item_codes = set(po_dict) & set(invoice_dict) & set(grn_dict)
-  #
-  #   result = []
-  #   for item_code in common_item_codes:
-  #     po_item = po_dict[item_code]
-  #     invoice_item = invoice_dict[item_code]
-  #     grn_item = grn_dict[item_code]
-  #
-  #     quantity_match = (
-  #       abs(po_item['quantity'] - invoice_item['quantity']) <= tolerance and
-  #       abs(po_item['quantity'] - grn_item['quantity']) <= tolerance
-  #     )
-  #
-  #     unit_price_match = abs(po_item['unit_price'] - invoice_item['unit_price']) <= tolerance
-  #
-  #     total_amount_match = abs(
-  #       invoice_item['total_amount'] - (invoice_item['quantity'] * invoice_item['unit_price'])) <= tolerance
-  #
-  #     result.append({
-  #       'item_code': item_code,
-  #       'quantity_match': quantity_match,
-  #       'unit_price_match': unit_price_match,
-  #       'total_amount_match': total_amount_match,
-  #       'status': 'Match' if quantity_match and unit_price_match and total_amount_match else 'Mismatch'
-  #     })
-  #
-  #   return result
+
+# --------------------------
+# Step 3: Matching Logic
+# --------------------------
 def match_line_items(po_lines, invoice_lines, grn_lines, tolerance=0.01):
-    po_dict = {item['item_code']: item for item in po_lines}
-    invoice_dict = {item['item_code']: item for item in invoice_lines}
-    grn_dict = {item['item_code']: item for item in grn_lines}
+  po_dict = {item['item_code']: item for item in po_lines}
+  invoice_dict = {item['item_code']: item for item in invoice_lines}
+  grn_dict = {item['item_code']: item for item in grn_lines}
 
-    common_item_codes = set(po_dict) | set(invoice_dict) | set(grn_dict)
+  common_item_codes = set(po_dict) | set(invoice_dict) | set(grn_dict)
 
-    items = []
-    matched_count = 0
+  items = []
+  matched_count = 0
 
-    for item_code in common_item_codes:
-      po_item = po_dict.get(item_code)
-      invoice_item = invoice_dict.get(item_code)
-      grn_item = grn_dict.get(item_code)
+  for item_code in common_item_codes:
+    po_item = po_dict.get(item_code)
+    invoice_item = invoice_dict.get(item_code)
+    grn_item = grn_dict.get(item_code)
 
-      def get_vals(item):
-        return {
-          "quantity": item["quantity"],
-          "unitPrice": item["unit_price"],
-          "totalAmount": item["total_amount"]
-        } if item else None
+    def get_vals(item):
+      return {
+        "quantity": item["quantity"],
+        "unitPrice": item["unit_price"],
+        "totalAmount": item["total_amount"]
+      } if item else None
 
-      po_vals = get_vals(po_item)
-      invoice_vals = get_vals(invoice_item)
-      grn_vals = get_vals(grn_item)
+    po_vals = get_vals(po_item)
+    invoice_vals = get_vals(invoice_item)
+    grn_vals = get_vals(grn_item)
 
-      # Check if all 3 exist before matching
-      if po_vals and invoice_vals and grn_vals:
-        quantity_match = (
-          abs(po_vals['quantity'] - invoice_vals['quantity']) <= tolerance and
-          abs(po_vals['quantity'] - grn_vals['quantity']) <= tolerance
-        )
-        unit_price_match = abs(po_vals['unitPrice'] - invoice_vals['unitPrice']) <= tolerance
-        total_amount_match = abs(
-          invoice_vals['totalAmount'] - (invoice_vals['quantity'] * invoice_vals['unitPrice'])) <= tolerance
+    # Check if all 3 exist before matching
+    if po_vals and invoice_vals and grn_vals:
+      quantity_match = (
+        abs(po_vals['quantity'] - invoice_vals['quantity']) <= tolerance and
+        abs(po_vals['quantity'] - grn_vals['quantity']) <= tolerance
+      )
+      unit_price_match = abs(po_vals['unitPrice'] - invoice_vals['unitPrice']) <= tolerance
+      total_amount_match = abs(
+        invoice_vals['totalAmount'] - (invoice_vals['quantity'] * invoice_vals['unitPrice'])) <= tolerance
 
-        status = "match" if quantity_match and unit_price_match and total_amount_match else "mismatch"
-      else:
-        status = "missing"
+      status = "match" if quantity_match and unit_price_match and total_amount_match else "mismatch"
+    else:
+      status = "missing"
 
-      if status == "match":
-        matched_count += 1
+    if status == "match":
+      matched_count += 1
 
-      items.append({
-        "itemCode": item_code,
-        "po": po_vals,
-        "invoice": invoice_vals,
-        "grn": grn_vals,
-        "status": status
-      })
+    items.append({
+      "itemCode": item_code,
+      "po": po_vals,
+      "invoice": invoice_vals,
+      "grn": grn_vals,
+      "status": status
+    })
 
-    return {
-      "matchedCount": matched_count,
-      "totalCount": len(items),
-      "items": items
-    }
+  return {
+    "matchedCount": matched_count,
+    "totalCount": len(items),
+    "items": items
+  }
+
+
+def is_pdf(path):
+  return path.lower().endswith(".pdf")
+
+
+def is_image(path):
+  return path.lower().endswith((".png", ".jpg", ".jpeg", ".bmp"))
 
 
 # --------------------------
 # Main endpoint
 # --------------------------
-# from fastapi import FastAPI, UploadFile, File
-# from fastapi.concurrency import run_in_threadpool
-# from PIL import Image
-
-
 @app.post("/upload-docs")
 async def upload_documents(
   po: UploadFile = File(...),
@@ -242,47 +224,79 @@ async def upload_documents(
   invoice_path = save_temp_file(invoice)
   grn_path = save_temp_file(grn)
 
-  # Determine file types
-  def is_pdf(file_path):
-    return file_path.lower().endswith(".pdf")
+  # Check type of each document
+  po_is_pdf = is_pdf(po_path)
+  invoice_is_pdf = is_pdf(invoice_path)
+  grn_is_pdf = is_pdf(grn_path)
 
-  # Extract text (with async threadpool support)
-  po_input: str = ""
-  invoice_input: str = ""
-  grn_input: str = ""
+  po_is_image = is_image(po_path)
+  invoice_is_image = is_image(invoice_path)
+  grn_is_image = is_image(grn_path)
+
+  # Detect mismatch: mix of PDFs and images
+  if len({po_is_pdf, invoice_is_pdf, grn_is_pdf}) > 1:
+    return {
+      "error": "Mismatch detected: Some documents are PDFs and others are images. Please upload consistent file types."}
+
+  # If all are images, run Gemini agent with paths
+  if all([po_is_image, invoice_is_image, grn_is_image]):
+    print("<<< Using Gemini Agent for image comparison >>>")
+    po_input = Image(filepath=po_path)
+    invoice_input = Image(filepath=invoice_path)
+    grn_input = Image(filepath=grn_path)
+
+
+    agent = get_matching_agent(session_id=uuid.uuid4().hex, debug_mode=True)
+
+    imgResponse = agent.run(
+      "Compare the image by 3-way matching give me Match status by Item Code and return a structured comparison with match status and give the response in json as mentioned in expected output",
+      images=[po_input, invoice_input, grn_input], stream=False)
+
+    print("<<<<< response >> ", imgResponse.content)
+    if isinstance(imgResponse.content, str):
+      content = imgResponse.content
+
+      # Try cleaning if it's a Markdown-style JSON block
+      cleaned_string = content.replace("```json", "").replace("```", "").strip()
+
+      try:
+        data = json.loads(cleaned_string)
+      except json.JSONDecodeError:
+        # Fallback to regex-based extraction
+        json_matches = re.findall(r"\{.*\}", content, re.DOTALL)
+        if not json_matches:
+          raise ValueError("No valid JSON found in response.")
+        try:
+          data = json.loads(json_matches[0])  # Load the first valid JSON
+        except json.JSONDecodeError as e:
+          raise ValueError(f"Failed to decode JSON: {str(e)}")
+        print("dAta :: ", data)
+      return data
+    # return imgResponse.content
+
+  # Else: assume all are PDFs and extract + match
   try:
-    po_input = await run_in_threadpool(extract_text, po_path) if is_pdf(po_path) else await run_in_threadpool(
-      Image.open, po_path)
+    po_input = await run_in_threadpool(extract_text, po_path)
   except Exception as e:
     print(f"Error extracting PO text: {e}")
+    po_input = ""
 
   try:
-    invoice_input = await run_in_threadpool(extract_text, invoice_path) if is_pdf(
-      invoice_path) else await run_in_threadpool(Image.open, invoice_path)
+    invoice_input = await run_in_threadpool(extract_text, invoice_path)
   except Exception as e:
     print(f"Error extracting Invoice text: {e}")
+    invoice_input = ""
 
   try:
-    grn_input = await run_in_threadpool(extract_text, grn_path) if is_pdf(grn_path) else await run_in_threadpool(
-      Image.open, grn_path)
+    grn_input = await run_in_threadpool(extract_text, grn_path)
   except Exception as e:
     print(f"Error extracting GRN text: {e}")
+    grn_input = ""
 
-  # Optional debug prints
-  print("[PO]", po_input)
-  print("[Invoice]", invoice_input)
-  print("[GRN]", grn_input)
-
-  print(f"Type of PO input: {type(po_input)}")
-  print(f"Type of Invoice input: {type(invoice_input)}")
-  print(f"Type of GRN input: {type(grn_input)}")
-
+  # Clean and parse
   po_input = clean_text(po_input)
   invoice_input = clean_text(invoice_input)
   grn_input = clean_text(grn_input)
-  print(f"Cleaned PO Input: {po_input[:500]}")  # Print the first 500 characters to check
-  print(f"Cleaned Invoice Input: {invoice_input[:500]}")
-  print(f"Cleaned GRN Input: {grn_input[:500]}")
 
   # Parse and match
   print("[Info] Passing text to parse_line_items")
@@ -293,81 +307,3 @@ async def upload_documents(
   matched_results = match_line_items(po_items, invoice_items, grn_items)
   print("[Match]", matched_results)
   return matched_results
-
-# @app.post("/upload-docs")
-# async def upload_documents(
-#   po: UploadFile = File(...),
-#   invoice: UploadFile = File(...),
-#   grn: UploadFile = File(...)
-# ):
-#   # Save uploaded files
-#   po_path = save_temp_file(po)
-#   invoice_path = save_temp_file(invoice)
-#   grn_path = save_temp_file(grn)
-#
-#   # Determine file types
-#   def is_pdf(file_path):
-#     return file_path.lower().endswith(".pdf")
-#
-#   # Extract OCR text
-#   po_input = extract_text(po_path) if is_pdf(po_path) else Image(filepath=po_path)
-#   invoice_input = extract_text(invoice_path) if is_pdf(invoice_path) else Image(filepath=invoice_path)
-#   grn_input = extract_text(grn_path) if is_pdf(grn_path) else Image(filepath=grn_path)
-#   # Setup Gemini Agent
-#   agent = get_matching_agent(session_id=uuid.uuid4().hex, debug_mode=True)
-#
-#   # If all are images
-#   if all(isinstance(i, Image) for i in [po_input, invoice_input, grn_input]):
-#     print("<<< Using agent in IF >>> ")
-#     response = agent.run(
-#       "Compare the image by 3-way matching give me Match status by Item Code and return a structured comparison with match status and give the response in json as mentioned in expected output",
-#       images=[po_input, invoice_input, grn_input], stream=False)
-#     print("<<<<< response >> ", response)
-#   else:
-#     print("<<< Using agent in else >>> ")
-#     # Run Agent on extracted text
-#     response = agent.run(
-#       f"""Extract line-items from the below texts:
-#        PO:\n{po_input if isinstance(po_input, str) else '[Image]'}\n
-#        INVOICE:\n{invoice_input if isinstance(invoice_input, str) else '[Image]'}\n
-#        GRN:\n{grn_input if isinstance(grn_input, str) else '[Image]'}\n
-#        Match by Item Code poQty, invoiceQty, grnQty, unitPrice, totalAmount, and return structured JSON with fields: itemCode, poQty, invoiceQty, grnQty, unitPrice, totalAmount, and status (match, partial, mismatch).""",
-#       stream=False
-#     )
-#
-#     print("Type offf :: ", type(response.content));
-#   # # Clean and return the structured output
-#   # cleaned_string = response.content.replace("```json", "").replace("```", "").strip()
-#   # data = json.loads(cleaned_string)
-#
-#   # json_matches = re.findall(r"\{.*\}", response.content, re.DOTALL)
-#   #
-#   # if not json_matches:
-#   #   raise ValueError("No valid JSON found in response.")
-#   #
-#   # try:
-#   #   data = json.loads(json_matches[0])  # Load the first valid JSON
-#   # except json.JSONDecodeError as e:
-#   #   raise ValueError(f"Failed to decode JSON: {str(e)}")
-#
-#   if isinstance(response.content, str):
-#     content = response.content
-#
-#     # Try cleaning if it's a Markdown-style JSON block
-#     cleaned_string = content.replace("```json", "").replace("```", "").strip()
-#
-#     try:
-#       data = json.loads(cleaned_string)
-#     except json.JSONDecodeError:
-#       # Fallback to regex-based extraction
-#       json_matches = re.findall(r"\{.*\}", content, re.DOTALL)
-#       if not json_matches:
-#         raise ValueError("No valid JSON found in response.")
-#       try:
-#         data = json.loads(json_matches[0])  # Load the first valid JSON
-#       except json.JSONDecodeError as e:
-#         raise ValueError(f"Failed to decode JSON: {str(e)}")
-#       print("dAta :: ", data)
-#     return data
-#   else:
-#     return response.content
