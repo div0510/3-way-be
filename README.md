@@ -1,4 +1,5 @@
 # 3-way-be
+
 # Document Matching API
 
 A FastAPI service for extracting and matching line items from Purchase Orders (PO), Invoices, and Goods Receipt Notes (
@@ -148,6 +149,7 @@ To enable OCR and PDF-to-image conversion, you'll need both Tesseract OCR and Po
 ```
 
 ### Automated setup on MacOS / Linux
+
 ```bash
   chmod +x setup.sh
   ./setup.sh
@@ -170,4 +172,29 @@ After installing the dependencies, run the FastAPI server with:
 ```
 
 ---
+
+## 🔧 Backend (FastAPI) – Brief Architecture
+
+```makefile
+📦 3-way-be/
+├── main.py               # FastAPI server and endpoint definitions
+├── assistant.py          # Core logic for PDF/image parsing, OCR, and 3-way document matching
+├── requirements.txt      # All necessary dependencies
+```
+
+### 🧠 Responsibilities:
+- Accepts PO, Invoice, and GRN files via /upload-docs API
+
+- Converts PDFs to images using pdf2image
+
+- Extracts text using pytesseract or PyMuPDF
+
+- Parses line items (quantity, price, etc.)
+
+- Matches line items across documents
+
+- Returns structured result with match status (match, partial, mismatch)
+
+### 📦 Key Libraries:
+- fastapi, pytesseract, pdf2image, fitz (PyMuPDF), Pillow, uvicorn
 
